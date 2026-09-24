@@ -717,7 +717,8 @@ body {
 Description formatting fix:
 - Preserves Microsoft 365 line breaks
 - Makes links clickable
-- Allows published image URLs to display as images
+- Renders Outlook image hyperlinks as images
+- Removes unusable Outlook cid: placeholders
 */
 #vfw7824-calendar #dialog-description {
   margin-top: 1rem;
@@ -2180,8 +2181,40 @@ Description formatting fix:
     eventTitle
   ) {
 
-    const trimmed =
-      line.trim();
+    let workingLine =
+      String(line || "");
+
+    let trimmed =
+      workingLine.trim();
+
+    /*
+      Microsoft 365 may publish an Outlook
+      inline image placeholder such as:
+
+      [cid:d5e567c3-b3fc-4076-8403-7e8bf2bef1c7]
+
+      The cid value points to an Outlook-only
+      embedded attachment and cannot be loaded
+      by the public website. Remove the placeholder
+      while preserving any useful text that follows it.
+    */
+    const cidMatch =
+      trimmed.match(
+        /^\[cid:[^\]]+\]\s*(.*)$/i
+      );
+
+    if (cidMatch) {
+
+      workingLine =
+        cidMatch[1] || "";
+
+      trimmed =
+        workingLine.trim();
+
+      if (!trimmed) {
+        return;
+      }
+    }
 
     if (!trimmed) {
 
@@ -2256,10 +2289,18 @@ Description formatting fix:
       "event-description-line";
 
     /*
-      Handles:
-      Need help?<https://example.com>
-      Meeting options<https://example.com>
-      and ordinary https:// links.
+      Microsoft/Outlook commonly exports hyperlinks as:
+
+      Visible text<https://example.com>
+
+      For an image this may look like:
+
+      2026_STAND_DOWN.png (960×672)
+      <https://example.com/2026_STAND_DOWN.png>
+
+      If the hyperlink destination is an image,
+      render the image instead of showing only
+      a clickable text link.
     */
     const tokenPattern =
       /([^<\n]*?)<(https?:\/\/[^>]+)>|(https?:\/\/[^\s<>]+)/g;
@@ -2272,7 +2313,9 @@ Description formatting fix:
     while (
       (
         match =
-          tokenPattern.exec(line)
+          tokenPattern.exec(
+            workingLine
+          )
       ) !== null
     ) {
 
@@ -2283,7 +2326,7 @@ Description formatting fix:
 
         lineElement.appendChild(
           document.createTextNode(
-            line.slice(
+            workingLine.slice(
               lastIndex,
               match.index
             )
@@ -2297,20 +2340,42 @@ Description formatting fix:
           (match[1] || "")
             .trim();
 
+        const url =
+          match[2];
+
+        /*
+          This is the key image fix.
+          Outlook may turn a pasted image URL into
+          "filename.png (960×672)<https://...png>".
+          The previous version treated that as a
+          normal hyperlink. Now an image destination
+          is rendered as an image.
+        */
+        if (isImageUrl(url)) {
+
+          appendImage(
+            parent,
+            url,
+            eventTitle
+          );
+
+          return;
+        }
+
         if (label) {
 
           appendLink(
             lineElement,
             label,
-            match[2]
+            url
           );
 
         } else {
 
           appendLink(
             lineElement,
-            match[2],
-            match[2]
+            url,
+            url
           );
         }
 
@@ -2323,9 +2388,13 @@ Description formatting fix:
 
         if (
           isImageUrl(url) &&
-          line.trim() === url
+          workingLine.trim() === url
         ) {
 
+          /*
+            A line containing only an image URL
+            becomes the image itself.
+          */
           appendImage(
             parent,
             url,
@@ -2350,22 +2419,28 @@ Description formatting fix:
 
     if (
       lastIndex <
-      line.length
+      workingLine.length
     ) {
 
       lineElement.appendChild(
         document.createTextNode(
-          line.slice(lastIndex)
+          workingLine.slice(
+            lastIndex
+          )
         )
       );
     }
 
+    /*
+      If nothing matched, preserve the
+      original plain text line.
+    */
     if (
       !lineElement.childNodes.length
     ) {
 
       lineElement.textContent =
-        line;
+        workingLine;
     }
 
     parent.appendChild(
