@@ -1,1 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>VFW Post 7824 Events Calendar</title>
+</head>
 
+<body>
+
+<main>
+  <h1>VFW Post 7824 Events Calendar</h1>
+
+  <p id="status">
+    Loading Microsoft 365 calendar...
+  </p>
+
+  <div id="events"></div>
+</main>
+
+<script>
+(async function () {
+
+  const status = document.getElementById("status");
+  const container = document.getElementById("events");
+
+  try {
+
+    const response = await fetch(
+      "./calendar-data.json",
+      { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        "Calendar data could not be loaded."
+      );
+    }
+
+    const data = await response.json();
+
+    status.textContent =
+      data.eventCount +
+      " calendar events loaded successfully.";
+
+    const now = new Date();
+
+    const futureEvents = data.events.filter(
+      event => new Date(event.end) >= now
+    );
+
+    futureEvents.slice(0, 20).forEach(event => {
+
+      const article =
+        document.createElement("article");
+
+      const heading =
+        document.createElement("h2");
+
+      heading.textContent = event.title;
+
+      const date =
+        document.createElement("p");
+
+      date.textContent =
+        new Date(event.start)
+          .toLocaleString();
+
+      article.appendChild(heading);
+      article.appendChild(date);
+
+      if (event.location) {
+
+        const location =
+          document.createElement("p");
+
+        location.textContent =
+          "Location: " + event.location;
+
+        article.appendChild(location);
+      }
+
+      container.appendChild(article);
+
+    });
+
+  } catch (error) {
+
+    status.textContent =
+      "The calendar could not be loaded.";
+
+    console.error(error);
+
+  }
+
+})();
+</script>
+
+</body>
+</html>
