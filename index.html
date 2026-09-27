@@ -1277,6 +1277,7 @@ Description formatting fix:
     <div class="dialog-body">
 
       <p id="dialog-source"></p>
+      <p id="dialog-categories"></p>
       <p id="dialog-time"></p>
       <p id="dialog-location"></p>
 
@@ -1386,6 +1387,9 @@ Description formatting fix:
     dialogSource:
       document.getElementById("dialog-source"),
 
+    dialogCategories:
+      document.getElementById("dialog-categories"),
+
     dialogTime:
       document.getElementById("dialog-time"),
 
@@ -1402,24 +1406,74 @@ Description formatting fix:
       document.getElementById("dialog-close")
   };
 
+  // Explicit source metadata takes precedence over title and category hints.
+  // Avoid guessing from prose: a Post event may mention a national program.
+  const EVENT_SOURCES = Object.freeze([
+    { label: "Post 7824", prefix: "[POST]", css: "post",
+      aliases: ["post", "post 7824", "vfw post 7824"] },
+    { label: "District 6", prefix: "[DISTRICT]", css: "district",
+      aliases: ["district", "district 6", "vfw district 6"] },
+    { label: "Department of Washington", prefix: "[DEPT]", css: "department",
+      aliases: ["dept", "department", "department of washington",
+        "vfw department of washington", "vfwwa"] },
+    { label: "VFW National", prefix: "[NATIONAL]", css: "national",
+      aliases: ["national", "vfw national"] }
+  ]);
+
+  function sourceDefinition(value) {
+    const name = String(value || "").trim().toLowerCase();
+    return EVENT_SOURCES.find(source => source.aliases.includes(name)) || null;
+  }
+
+  function eventCategories(value) {
+    // JSON arrays preserve category names containing commas.
+    const values = Array.isArray(value)
+      ? value
+      : typeof value === "string" ? value.split(",") : [];
+    return [...new Set(values
+      .filter(item => typeof item === "string")
+      .map(item => item.trim())
+      .filter(Boolean))];
+  }
+
+  function classifyEventSource(event) {
+    const explicit = sourceDefinition(event.source);
+    if (explicit) return explicit;
+
+    const title = String(event.title || event.summary || "");
+    const prefix = title.match(/^\s*\[(POST|DISTRICT|DEPT|NATIONAL)\]/i);
+    if (prefix) return sourceDefinition(prefix[1]);
+
+    const categories = [...new Set(eventCategories(event.categories)
+      .map(sourceDefinition).filter(Boolean))];
+    if (categories.length === 1) return categories[0];
+
+    const marker = String(event.description || "")
+      .match(/^Calendar Source:\s*([^\r\n]+)$/im);
+    const markedSource = marker && sourceDefinition(marker[1]);
+    return markedSource || EVENT_SOURCES[0];
+  }
+
+  function normalizeEvent(event) {
+    const source = classifyEventSource(event);
+    const title = String(event.title || event.summary || "Event")
+      .replace(/^(?:\s*\[(?:POST|DISTRICT|DEPT|NATIONAL)\]\s*)+/i, "")
+      .trim() || "Event";
+    const categories = eventCategories(event.categories);
+    if (!categories.includes(source.label)) categories.push(source.label);
+
+    // Keep IDs, dates, descriptions, URLs, recurrence data, and other fields.
+    // This only normalizes the page's in-memory data, not the published ICS.
+    return {
+      ...event,
+      title: source.prefix + " " + title,
+      source: source.label,
+      categories
+    };
+  }
+
   function sourceClass(source) {
-
-    const value =
-      String(source || "").toLowerCase();
-
-    if (value.includes("national")) {
-      return "national";
-    }
-
-    if (value.includes("department")) {
-      return "department";
-    }
-
-    if (value.includes("district")) {
-      return "district";
-    }
-
-    return "post";
+    return (sourceDefinition(source) || EVENT_SOURCES[0]).css;
   }
 
   function dateKey(date) {
@@ -2015,48 +2069,33 @@ Description formatting fix:
   }
 
   function populateFilters() {
+    // Include normalized event values even when the generated lists omit them.
+    const sources = new Set(events.map(event => event.source));
+    (Array.isArray(calendarData.sources) ? calendarData.sources : [])
+      .forEach(value => {
+        const source = sourceDefinition(value);
+        if (source) sources.add(source.label);
+      });
+    const categories = new Set([
+      ...eventCategories(calendarData.categories),
+      ...events.flatMap(event => event.categories)
+    ]);
 
-    (
-      calendarData.sources ||
-      []
-    ).forEach(source => {
+    function fill(select, values) {
+      const previous = select.value;
+      while (select.options.length > 1) select.remove(1);
+      values.forEach(value => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+      select.value = values.includes(previous) ? previous : "";
+    }
 
-      const option =
-        document.createElement(
-          "option"
-        );
-
-      option.value =
-        source;
-
-      option.textContent =
-        source;
-
-      els.source.appendChild(
-        option
-      );
-    });
-
-    (
-      calendarData.categories ||
-      []
-    ).forEach(category => {
-
-      const option =
-        document.createElement(
-          "option"
-        );
-
-      option.value =
-        category;
-
-      option.textContent =
-        category;
-
-      els.category.appendChild(
-        option
-      );
-    });
+    fill(els.source, EVENT_SOURCES.map(source => source.label)
+      .filter(label => sources.has(label)));
+    fill(els.category, [...categories].sort((a, b) => a.localeCompare(b)));
   }
 
   function isImageUrl(url) {
@@ -2539,6 +2578,9 @@ Description formatting fix:
         "Post 7824"
       );
 
+    els.dialogCategories.textContent =
+      "Categories: " + event.categories.join(", ");
+
     els.dialogTime.textContent =
       formatEventDateTime(
         event
@@ -2637,7 +2679,7 @@ Description formatting fix:
         Array.isArray(
           calendarData.events
         )
-          ? calendarData.events
+          ? calendarData.events.map(normalizeEvent)
           : [];
 
       populateFilters();
